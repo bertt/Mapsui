@@ -45,18 +45,17 @@ namespace Bertt.Samples.AndroidPolygons
 
         private List<Tile> GetRandomTiles()
         {
-            var rndX = new Random();
-            var rndY = new Random();
+            var rnd = new Random();
 
             var res = new List<Tile>();
 
             // add 5000 polygons
             for (int i = 0; i < 10000; i++)
             {
-                var x = rndX.Next(16383);
-                var Y = rndX.Next(16383);
+                var x = rnd.Next(16383);
+                var y = rnd.Next(16383);
 
-                var t = new Tile(x, Y, 14);
+                var t = new Tile(x, y, 14);
                 res.Add(t);
             }
 
