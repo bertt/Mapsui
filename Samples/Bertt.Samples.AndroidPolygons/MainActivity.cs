@@ -51,7 +51,7 @@ namespace Bertt.Samples.AndroidPolygons
             var res = new List<Tile>();
 
             // add 5000 polygons
-            for (int i = 0; i < 5000; i++)
+            for (int i = 0; i < 10000; i++)
             {
                 var x = rndX.Next(16383);
                 var Y = rndX.Next(16383);
