@@ -1,10 +1,18 @@
 ﻿using System;
+using System.ComponentModel;
 using System.IO;
 using Android.App;
 using Android.Content.PM;
-using Android.OS;
+using Android.Graphics;
+using Android.Views;
+using Android.Widget;
+using Java.Lang;
+using Mapsui.Providers;
+using Mapsui.Samples.Common.Helpers;
 using Mapsui.Samples.Common.Maps;
+using Mapsui.UI;
 using Mapsui.UI.Android;
+using Path = System.IO.Path;
 
 namespace Mapsui.Samples.Android
 {
@@ -17,40 +25,92 @@ namespace Mapsui.Samples.Android
 
     public class Activity1 : Activity
     {
-        protected override void OnCreate(Bundle bundle)
+        private LinearLayout _popup;
+
+        protected override void OnCreate(global::Android.OS.Bundle bundle)
         {
             base.OnCreate(bundle);
             SetContentView(Resource.Layout.Main);
 
-            DeployMbTilesFile();
+            // Hack to tell the platform independent samples where the files can be found on Android.
             MbTilesSample.MbTilesLocation = MbTilesLocationOnAndroid;
+            MbTilesHelper.DeployMbTilesFile(s => File.Create(Path.Combine(MbTilesLocationOnAndroid, s)));
             
             var mapControl = FindViewById<MapControl>(Resource.Id.mapcontrol);
-            mapControl.Map = MbTilesSample.CreateMap();
+            mapControl.Map = InfoLayersSample.CreateMap();
+            mapControl.Map.Info+= MapOnInfo;
+            mapControl.Map.Viewport.ViewportChanged += ViewportOnViewportChanged;
+            mapControl.RotationLock = true;
+            mapControl.UnSnapRotationDegrees = 30;
+            mapControl.ReSnapRotationDegrees = 5;
+
+            FindViewById<RelativeLayout>(Resource.Id.mainLayout).AddView(_popup = CreatePopup());
         }
 
-        private void DeployMbTilesFile()
+        private void ViewportOnViewportChanged(object sender, PropertyChangedEventArgs propertyChangedEventArgs)
         {
-            var path = "Mapsui.Samples.Common.EmbeddedResources.world.mbtiles";
-            var assembly = typeof(PointsSample).Assembly;
-            using (var image = assembly.GetManifestResourceStream(path))
+            //if (_popup != null)
+            //    _popup.Visibility = ViewStates.Gone;
+        }
+
+        private LinearLayout CreatePopup()
+        {
+            var linearLayout = new LinearLayout(this);
+            linearLayout.AddView(CreateTextView());
+            linearLayout.SetPadding(5,5,5,5);
+            linearLayout.SetBackgroundColor(Color.DarkGray);
+            return linearLayout;
+        }
+
+        private TextView CreateTextView()
+        {
+            var textView = new TextView(this)
             {
-                if (image == null) throw new ArgumentException("EmbeddedResource not found");
-                using (var dest = File.Create(MbTilesLocationOnAndroid))
-                {
-                    image.CopyTo(dest);
-                }
+                TextSize = 16,
+                
+                Text = "Native Android pop-up",
+                LayoutParameters = new RelativeLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WrapContent,
+                    ViewGroup.LayoutParams.WrapContent)
+            };
+            textView.SetPadding(3, 3, 3, 3);
+            //textView.SetBackgroundColor(Color.DarkOrange);
+            return textView;
+        }
+
+        private void MapOnInfo(object sender, MapInfoEventArgs args)
+        {
+            if (args.MapInfo.Feature != null)
+            {
+                RunOnUiThread(new Runnable(Toast.MakeText(
+                    ApplicationContext,
+                    ToDisplayText(args.MapInfo.Feature),
+                    ToastLength.Short).Show));
+
+                ShowPopup(args);
             }
         }
 
-        private static string MbTilesLocationOnAndroid
+        private void ShowPopup(MapInfoEventArgs args)
         {
-            get
-            {
-                var folder = System.Environment.GetFolderPath(System.Environment.SpecialFolder.Personal);
-                var path = Path.Combine(folder, "world.mbtiles");
-                return path;
-            }
+            var mapControl = FindViewById<MapControl>(Resource.Id.mapcontrol);
+            var screenPosition = mapControl.WorldToScreen(args.MapInfo.Feature.Geometry.GetBoundingBox().GetCentroid());
+            
+            _popup.SetX((float)args.MapInfo.ScreenPosition.X);
+            _popup.SetY((float)args.MapInfo.ScreenPosition.Y);
+
+            _popup.Visibility = ViewStates.Visible;
         }
+
+        private static string ToDisplayText(IFeature feature)
+        {
+            var result = new StringBuilder();
+            foreach (var field in feature.Fields)
+                result.Append($"{field}:{feature[field]} - ");
+            var str = result.ToString();
+            return str.Substring(0, result.Length() - 3);
+        }
+        
+        private static string MbTilesLocationOnAndroid => Environment.GetFolderPath(Environment.SpecialFolder.Personal);
     }
 }

@@ -28,7 +28,7 @@ namespace Mapsui
         Point WorldToScreenUnrotated(double x, double y);
         Point ScreenToWorld(double x, double y);
         void Transform(double screenX, double screenY, double previousScreenX, double previousScreenY, 
-            double deltaScale = 1);
+            double deltaScale = 1, double deltaRotation = 0);
         Point Center { get; set; }
         double Resolution { get; set; }
         BoundingBox Extent { get; }
@@ -41,5 +41,6 @@ namespace Mapsui
         /// </summary>
         double Rotation { get; set; }
         bool IsRotated { get; }
+        bool Initialized { get; }
     }
 }

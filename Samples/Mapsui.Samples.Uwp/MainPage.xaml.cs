@@ -1,8 +1,13 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
+using System.Reflection;
+using Windows.Storage;
 using Windows.UI.Xaml;
 using Windows.UI.Xaml.Controls;
+using Mapsui.Samples.Common.Helpers;
+using Mapsui.Samples.Common.Maps;
 using Mapsui.UI;
 using Mapsui.Utilities;
 
@@ -15,17 +20,24 @@ namespace Mapsui.Samples.Uwp
         {
             InitializeComponent();
 
+            // Hack to tell the platform independent samples where the files can be found on Android.
+            MbTilesSample.MbTilesLocation = MbTilesLocationOnUwp;
+            MbTilesHelper.DeployMbTilesFile(s => File.Create(Path.Combine(MbTilesLocationOnUwp, s)));
+
             MapControl.Map.Layers.Add(OpenStreetMap.CreateTileLayer());
+            MapControl.RotationLock = true;
+            MapControl.UnSnapRotationDegrees = 30;
+            MapControl.ReSnapRotationDegrees = 5;
 
             FillComboBoxWithDemoSamples();
 
             SampleSet.SelectionChanged += SampleSet_SelectionChanged;
         }
 
-        private void MapOnInfo(object sender, InfoEventArgs infoEventArgs)
+        private void MapOnInfo(object sender, MapInfoEventArgs args)
         {
-            if (infoEventArgs.Feature != null)
-                FeatureInfo.Text = $"Click Info:{Environment.NewLine}{infoEventArgs.Feature.ToDisplayText()}";
+            if (args.MapInfo.Feature != null)
+                FeatureInfo.Text = $"Click Info:{Environment.NewLine}{args.MapInfo.Feature.ToDisplayText()}";
         }
 
         private void FillComboBoxWithDemoSamples()
@@ -100,5 +112,7 @@ namespace Mapsui.Samples.Uwp
 
             return radioButton;
         }
+
+        private static string MbTilesLocationOnUwp => ApplicationData.Current.LocalFolder.Path;
     }
 }

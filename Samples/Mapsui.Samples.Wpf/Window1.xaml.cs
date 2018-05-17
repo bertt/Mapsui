@@ -1,13 +1,14 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
-using System.Windows.Data;
 using System.Windows.Input;
 using Mapsui.Logging;
 using Mapsui.Samples.Common.Desktop;
+using Mapsui.Samples.Wpf.Utilities;
 using Mapsui.Tests.Common;
 using Mapsui.UI;
 
@@ -21,9 +22,9 @@ namespace Mapsui.Samples.Wpf
             MapControl.ErrorMessageChanged += MapErrorMessageChanged;
             MapControl.FeatureInfo += MapControlFeatureInfo;
             MapControl.MouseMove += MapControlOnMouseMove;
-            
-            Fps.SetBinding(TextBlock.TextProperty, new Binding("Fps"));
-            Fps.DataContext = MapControl.FpsCounter;
+            MapControl.RotationLock = true;
+            MapControl.UnSnapRotationDegrees = 30;
+            MapControl.ReSnapRotationDegrees = 5;
 
             Logger.LogDelegate += LogMethod;
 
@@ -31,19 +32,19 @@ namespace Mapsui.Samples.Wpf
 
             SampleSet.SelectionChanged += SampleSetOnSelectionChanged;
             RenderMode.SelectionChanged += RenderModeOnSelectionChanged;
-            var firstRadioButton = (RadioButton) SampleList.Children[0];
+            var firstRadioButton = (RadioButton)SampleList.Children[0];
             firstRadioButton.IsChecked = true;
             firstRadioButton.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
         }
 
-        private void MapControlOnHover(object sender, InfoEventArgs e)
+        private void MapControlOnHover(object sender, MapInfoEventArgs args)
         {
-            FeatureInfo.Text = e.Feature == null ? "" : $"Hover Info:{Environment.NewLine}{e.Feature.ToDisplayText()}";
+            FeatureInfo.Text = args.MapInfo.Feature == null ? "" : $"Hover Info:{Environment.NewLine}{args.MapInfo.Feature.ToDisplayText()}";
         }
 
         private void RenderModeOnSelectionChanged(object sender, SelectionChangedEventArgs selectionChangedEventArgs)
         {
-            var selectedValue = ((ComboBoxItem) ((ComboBox) sender).SelectedItem).Content.ToString();
+            var selectedValue = ((ComboBoxItem)((ComboBox)sender).SelectedItem).Content.ToString();
 
             if (selectedValue.ToLower().Contains("wpf"))
                 MapControl.RenderMode = UI.Wpf.RenderMode.Wpf;
@@ -80,7 +81,7 @@ namespace Mapsui.Samples.Wpf
 
         private void SampleSetOnSelectionChanged(object sender, SelectionChangedEventArgs e)
         {
-            var selectedValue = ((ComboBoxItem) ((ComboBox) sender).SelectedItem).Content.ToString();
+            var selectedValue = ((ComboBoxItem)((ComboBox)sender).SelectedItem).Content.ToString();
 
             if (selectedValue == "Demo samples")
                 FillComboBoxWithDemoSamples();
@@ -107,8 +108,10 @@ namespace Mapsui.Samples.Wpf
             var allSamples = Common.AllSamples.CreateList();
             // Append samples from Mapsui.Desktop
             allSamples["Shapefile (Desktop)"] = ShapefileSample.CreateMap;
+            allSamples["ThemeStyle (Desktop)"] = ThemeStyleSample.CreateMap;
             allSamples["Tiles on disk (Desktop)"] = MapTilerSample.CreateMap;
             allSamples["WMS (Desktop)"] = WmsSample.CreateMap;
+            allSamples["Slow WMS (Desktop)"] = SlowWmsSample.CreateMap;
             return allSamples;
         }
 
@@ -128,15 +131,30 @@ namespace Mapsui.Samples.Wpf
                 MapControl.Map.Info += MapControlOnInfo;
                 MapControl.Map.Hover += MapControlOnHover;
                 LayerList.Initialize(MapControl.Map.Layers);
-                MapControl.Refresh();
-                
             };
             return radioButton;
         }
 
-        private void LogMethod(LogLevel logLevel, string s, Exception exception)
+        readonly LimitedQueue<LogModel> _logMessage = new LimitedQueue<LogModel>(6);
+
+        private void LogMethod(LogLevel logLevel, string message, Exception exception)
         {
-            Dispatcher.Invoke(() => LogTextBox.Text = $"{logLevel} {s}");
+            _logMessage.Enqueue(new LogModel { Exception = exception, LogLevel = logLevel, Message = message });
+            Dispatcher.Invoke(() => LogTextBox.Text = ToMultiLineString(_logMessage));
+        }
+
+        private string ToMultiLineString(LimitedQueue<LogModel> logMessages)
+        {
+            var result = new StringBuilder();
+
+            var copy = logMessages.ToList();
+            foreach (var logMessage in copy)
+            {
+                if (logMessage == null) continue;
+                result.Append($"{logMessage.LogLevel} {logMessage.Message}{Environment.NewLine}");
+            }
+
+            return result.ToString();
         }
 
         private static void MapControlFeatureInfo(object sender, FeatureInfoEventArgs e)
@@ -151,15 +169,15 @@ namespace Mapsui.Samples.Wpf
 
         private void RotationSliderChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
         {
-            var percent = RotationSlider.Value/(RotationSlider.Maximum - RotationSlider.Minimum);
-            MapControl.Map.Viewport.Rotation = percent*360;
+            var percent = RotationSlider.Value / (RotationSlider.Maximum - RotationSlider.Minimum);
+            MapControl.Map.Viewport.Rotation = percent * 360;
             MapControl.Refresh();
         }
 
-        private void MapControlOnInfo(object sender, InfoEventArgs infoEventArgs)
+        private void MapControlOnInfo(object sender, MapInfoEventArgs args)
         {
-            if (infoEventArgs.Feature != null)
-                FeatureInfo.Text = $"Click Info:{Environment.NewLine}{infoEventArgs.Feature.ToDisplayText()}";
+            if (args.MapInfo.Feature != null)
+                FeatureInfo.Text = $"Click Info:{Environment.NewLine}{args.MapInfo.Feature.ToDisplayText()}";
         }
     }
 }

@@ -67,11 +67,39 @@ namespace Mapsui.Tests.Common.Maps
                             {
                                 Text = "Black Halo",
                                 ForeColor = Color.White,
-                                Halo = new Pen(Color.Red),
+                                Halo = new Pen(Color.Black),
                                 BackColor = null
                             }
                         }
-                }
+                },
+                new Feature
+                {
+                    Geometry = new Point(50, -50),
+                    Styles = new[]
+                    {
+                        new LabelStyle
+                        {
+                            Text = string.Empty,
+                            BackColor = new Brush(Color.Black),
+                            ForeColor = Color.White,
+                            LabelMethod = f => null
+                        }
+                    }
+                },
+                new Feature
+                {
+                    Geometry = new Point(100, 100),
+                    Styles = new[]
+                    {
+                        new LabelStyle
+                        {
+                            Text = "Multiline\nText",
+                            BackColor = new Brush(Color.Gray),
+                            ForeColor = Color.Black,
+                            HorizontalAlignment = LabelStyle.HorizontalAlignmentEnum.Center,
+                        }
+                    }
+                },
             };
             var provider = new MemoryProvider(features);
             return provider;

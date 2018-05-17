@@ -7,26 +7,20 @@ using System;
 using System.ComponentModel;
 using System.Linq;
 using CoreGraphics;
-using Mapsui.Geometries.Utilities;
+using Mapsui.Geometries;
+using Mapsui.Logging;
+using Mapsui.Widgets;
 using SkiaSharp.Views.iOS;
 
 namespace Mapsui.UI.iOS
 {
     [Register("MapControl"), DesignTimeVisible(true)]
-    public class MapControl : UIStackView, IMapControl
+    public partial class MapControl : UIView, IMapControl
     {
         private Map _map;
         private readonly MapRenderer _renderer = new MapRenderer();
-        private readonly SKCanvasView _canvas = new SKCanvasView();
-        private readonly AttributionView _attributionPanel = new AttributionView();
-        private nuint _previousTouchCount = 0;
-        private bool _viewportInitialized;
-        private nfloat _previousX;
-        private nfloat _previousY;
-        private double _previousRadius;
-
-        private float Width => (float)Frame.Width;
-        private float Height => (float)Frame.Height;
+        private readonly SKGLView _canvas = new SKGLView();
+        private double _innerRotation;
 
         public event EventHandler ViewportInitialized;
 
@@ -42,79 +36,88 @@ namespace Mapsui.UI.iOS
             Initialize();
         }
 
-        public override CGRect Frame
-        {
-            get { return base.Frame; }
-            set
-            {
-                Resize(value);
-                base.Frame = value;
-            }
-        }
-
-        private void Resize(CGRect frame)
-        {
-            _canvas.Frame = frame;
-            _attributionPanel.Frame = new CGRect(
-                frame.Width - _attributionPanel.Frame.Width,
-                frame.Height - _attributionPanel.Frame.Height,
-                _attributionPanel.Frame.Width,
-                _attributionPanel.Frame.Height);
-        }
-
         public void Initialize()
         {
             Map = new Map();
             BackgroundColor = UIColor.White;
 
-            Axis = UILayoutConstraintAxis.Vertical;
-
-            _canvas.ClipsToBounds = true;
+            _canvas.TranslatesAutoresizingMaskIntoConstraints = false;
             _canvas.MultipleTouchEnabled = true;
+
             AddSubview(_canvas);
 
-            AddSubview(_attributionPanel);
+            AddConstraints(new[] {
+                NSLayoutConstraint.Create(this, NSLayoutAttribute.Leading, NSLayoutRelation.Equal, _canvas, NSLayoutAttribute.Leading, 1.0f, 0.0f),
+                NSLayoutConstraint.Create(this, NSLayoutAttribute.Trailing, NSLayoutRelation.Equal, _canvas, NSLayoutAttribute.Trailing, 1.0f, 0.0f),
+                NSLayoutConstraint.Create(this, NSLayoutAttribute.Top, NSLayoutRelation.Equal, _canvas, NSLayoutAttribute.Top, 1.0f, 0.0f),
+                NSLayoutConstraint.Create(this, NSLayoutAttribute.Bottom, NSLayoutRelation.Equal, _canvas, NSLayoutAttribute.Bottom, 1.0f, 0.0f)
+            });
 
-            InitializeViewport();
+            TryInitializeViewport();
 
             ClipsToBounds = true;
-
             MultipleTouchEnabled = true;
             UserInteractionEnabled = true;
 
             _canvas.PaintSurface += OnPaintSurface;
-        }
 
-        public override void LayoutMarginsDidChange()
-        {
-            if (_canvas == null) return;
-
-            var frame = _canvas.Frame;
-            frame.Size = frame.Size;
-            _canvas.Frame = frame;
-
-            base.LayoutMarginsDidChange();
-        }
-
-        private void OnPaintSurface(object sender, SKPaintSurfaceEventArgs skPaintSurfaceEventArgs)
-        {
-            if (!_viewportInitialized) InitializeViewport();
-            if (!_viewportInitialized) return;
-
-            if (Width != _map.Viewport.Width) _map.Viewport.Width = Width;
-            if (Height != _map.Viewport.Height) _map.Viewport.Height = Height;
-
-            var scaleFactor = 2; // todo: figure out how to get this value programatically
-            skPaintSurfaceEventArgs.Surface.Canvas.Scale(scaleFactor, scaleFactor);
-
-            _renderer.Render(skPaintSurfaceEventArgs.Surface.Canvas, _map.Viewport, _map.Layers, _map.BackColor);
-        }
-
-        private void InitializeViewport()
-        {
-            if (ViewportHelper.TryInitializeViewport(_map, Width, Height))
+            var doubleTapGestureRecognizer = new UITapGestureRecognizer(OnDoubleTapped)
             {
-                _viewportInitialized = true;
+                NumberOfTapsRequired = 2,
+                CancelsTouchesInView = false,
+            };
+            AddGestureRecognizer(doubleTapGestureRecognizer);
+
+            var tapGestureRecognizer = new UITapGestureRecognizer(OnSingleTapped)
+            {
+                NumberOfTapsRequired = 1,
+                CancelsTouchesInView = false,
+            };
+            tapGestureRecognizer.RequireGestureRecognizerToFail(doubleTapGestureRecognizer);
+            AddGestureRecognizer(tapGestureRecognizer);
+        }
+
+        private void OnDoubleTapped(UITapGestureRecognizer gesture)
+        {
+            var screenPosition = GetScreenPosition(gesture.LocationInView(this));
+
+            var tapWasHandled = Map.InvokeInfo(screenPosition, screenPosition, _scale, _renderer.SymbolCache, WidgetTouched, 2);
+
+            if (!tapWasHandled)
+            {
+                // TODO 
+                // double tap zoom here
+            }
+        }
+
+        private void OnSingleTapped(UITapGestureRecognizer gesture)
+        {
+            var screenPosition = GetScreenPosition(gesture.LocationInView(this));
+
+            Map.InvokeInfo(screenPosition, screenPosition, _scale, _renderer.SymbolCache, WidgetTouched, 1);
+        }
+
+        void OnPaintSurface(object sender, SKPaintGLSurfaceEventArgs skPaintSurfaceEventArgs)
+        {
+            TryInitializeViewport();
+            if (!_map.Viewport.Initialized) return;
+
+            _map.Viewport.Width = _canvas.Frame.Width;
+            _map.Viewport.Height = _canvas.Frame.Height;
+
+            _scale = (float)_canvas.ContentScaleFactor;
+            skPaintSurfaceEventArgs.Surface.Canvas.Scale(_scale, _scale);
+
+            _renderer.Render(skPaintSurfaceEventArgs.Surface.Canvas,
+                _map.Viewport, _map.Layers, _map.Widgets, _map.BackColor);
+        }
+
+        private void TryInitializeViewport()
+        {
+            if (_map.Viewport.Initialized) return;
+
+            if (_map.Viewport.TryInitializeViewport(_map, _canvas.Frame.Width, _canvas.Frame.Height))
+            {
                 Map.ViewChanged(true);
                 OnViewportInitialized();
             }
@@ -125,111 +128,110 @@ namespace Mapsui.UI.iOS
             ViewportInitialized?.Invoke(this, EventArgs.Empty);
         }
 
+        public override void TouchesBegan(NSSet touches, UIEvent evt)
+        {
+            base.TouchesBegan(touches, evt);
+
+            _innerRotation = _map.Viewport.Rotation;
+        }
+
         public override void TouchesMoved(NSSet touches, UIEvent evt)
         {
             base.TouchesMoved(touches, evt);
-
             
-            if (touches.Count == 1)
+            if (evt.AllTouches.Count == 1)
             {
-                var touch = touches.AnyObject as UITouch;
-                if (touch != null)
+                if (touches.AnyObject is UITouch touch)
                 {
                     var currentPos = touch.LocationInView(this);
                     var previousPos = touch.PreviousLocationInView(this);
+                    
+                    _map.Viewport.Transform(currentPos.X, currentPos.Y, previousPos.X, previousPos.Y);
 
-                    var cRect = new CGRect(new CGPoint((int)currentPos.X, (int)currentPos.Y), new CGSize(5, 5));
-                    var pRect = new CGRect(new CGPoint((int)previousPos.X, (int)previousPos.Y), new CGSize(5, 5));
+                    ViewportLimiter.LimitExtent(_map.Viewport, _map.PanMode, _map.PanLimits, _map.Envelope);
 
-                    if (!cRect.IntersectsWith(pRect))
+                    RefreshGraphics();
+
+                    _innerRotation = _map.Viewport.Rotation;
+                }
+            }
+            else if (evt.AllTouches.Count >= 2)
+            {
+                var prevLocations = evt.AllTouches.Select(t => ((UITouch)t).PreviousLocationInView(this))
+                                           .Select(p => new Point(p.X, p.Y)).ToList();
+                
+                var locations = evt.AllTouches.Select(t => ((UITouch)t).LocationInView(this))
+                                        .Select(p => new Point(p.X, p.Y)).ToList();
+
+                var (prevCenter, prevRadius, prevAngle) = GetPinchValues(prevLocations);
+                var (center, radius, angle) = GetPinchValues(locations);
+
+                double rotationDelta = 0;
+
+                if (RotationLock)
+                {
+                    _innerRotation += angle - prevAngle;
+                    _innerRotation %= 360;
+
+                    if (_innerRotation > 180)
+                        _innerRotation -= 360;
+                    else if (_innerRotation < -180)
+                        _innerRotation += 360;
+
+                    if (_map.Viewport.Rotation == 0 && Math.Abs(_innerRotation) >= Math.Abs(UnSnapRotationDegrees))
+                        rotationDelta = _innerRotation;
+                    else if (_map.Viewport.Rotation != 0)
                     {
-                        if (_previousTouchCount == touches.Count)
-                        {
-                            _map.Viewport.Transform(currentPos.X, currentPos.Y, previousPos.X, previousPos.Y);
-                            RefreshGraphics();
-                        }
+                        if (Math.Abs(_innerRotation) <= Math.Abs(ReSnapRotationDegrees))
+                            rotationDelta = -_map.Viewport.Rotation;
+                        else
+                            rotationDelta = _innerRotation - _map.Viewport.Rotation;
                     }
                 }
+
+                _map.Viewport.Transform(center.X, center.Y, prevCenter.X, prevCenter.Y, radius / prevRadius, rotationDelta);
+
+                ViewportLimiter.Limit(_map.Viewport,
+                    _map.ZoomMode, _map.ZoomLimits, _map.Resolutions,
+                    _map.PanMode, _map.PanLimits, _map.Envelope);
+
+                RefreshGraphics();
             }
-            else if (touches.Count == 2)
-            {
-                nfloat centerX = 0;
-                nfloat centerY = 0;
-
-                var locations = touches.Select(t => ((UITouch) t).LocationInView(this)).ToList();
-
-                foreach (var location in locations)
-                {
-                    centerX += location.X;
-                    centerY += location.Y;
-                }
-
-                centerX = centerX / touches.Count;
-                centerY = centerY / touches.Count;
-                var radius = Algorithms.Distance(centerX, centerY, locations[0].X, locations[0].Y);
-
-                if (_previousTouchCount == touches.Count)
-                {
-                    _map.Viewport.Transform(centerX, centerY, _previousX, _previousY, radius / _previousRadius);
-                    RefreshGraphics();
-                }
-
-                _previousX = centerX;
-                _previousY = centerY;
-                _previousRadius = radius;
-            }
-            _previousTouchCount = touches.Count;
         }
 
         public override void TouchesEnded(NSSet touches, UIEvent e)
         {
             Refresh();
-            HandleInfo(e.AllTouches);
         }
 
-        private void HandleInfo(NSSet touches)
+        private Point GetScreenPosition(CGPoint point)
         {
-            if (touches.Count != 1) return;
-            var touch = touches.FirstOrDefault() as UITouch;
-            if (touch == null) return;
-            var screenPosition = touch.LocationInView(this);
-            Map.InvokeInfo(screenPosition.ToMapsui(), _renderer.SymbolCache);
+            return new Point(point.X, point.Y);
         }
 
         public void Refresh()
         {
             RefreshGraphics();
-            _map.ViewChanged(true);
+            RefreshData();
         }
 
         public Map Map
         {
-            get
-            {
-                return _map;
-            }
+            get => _map;
             set
             {
                 if (_map != null)
                 {
-                    var temp = _map;
+                    UnsubscribeFromMapEvents(_map);
                     _map = null;
-                    temp.DataChanged -= MapDataChanged;
-                    temp.PropertyChanged -= MapPropertyChanged;
-                    temp.RefreshGraphics -= MapRefreshGraphics;
-                    temp.Dispose();
-                    _attributionPanel.Clear();
                 }
 
                 _map = value;
 
                 if (_map != null)
                 {
-                    _map.DataChanged += MapDataChanged;
-                    _map.PropertyChanged += MapPropertyChanged;
-                    _map.RefreshGraphics += MapRefreshGraphics;
+                    SubscribeToMapEvents(_map);
                     _map.ViewChanged(true);
-                    _attributionPanel.Populate(Map.Layers);
                 }
 
                 RefreshGraphics();
@@ -251,10 +253,6 @@ namespace Mapsui.UI.iOS
             {
                 RefreshGraphics();
             }
-            else if (e.PropertyName == nameof(Map.Layers))
-            {
-                _attributionPanel.Populate(Map.Layers);
-            }
         }
 
         private void MapDataChanged(object sender, DataChangedEventArgs e)
@@ -263,35 +261,90 @@ namespace Mapsui.UI.iOS
 
             DispatchQueue.MainQueue.DispatchAsync(delegate
             {
-                if (e == null)
+                try
                 {
-                    errorMessage = "MapDataChanged Unexpected error: DataChangedEventArgs can not be null";
-                    Console.WriteLine(errorMessage);
-                }
-                else if (e.Cancelled)
-                {
-                    errorMessage = "MapDataChanged: Cancelled";
-                    System.Diagnostics.Debug.WriteLine(errorMessage);
-                }
-                else if (e.Error is System.Net.WebException)
-                {
-                    errorMessage = "MapDataChanged WebException: " + e.Error.Message;
-                    Console.WriteLine(errorMessage);
-                }
-                else if (e.Error != null)
-                {
-                    errorMessage = "MapDataChanged errorMessage: " + e.Error.GetType() + ": " + e.Error.Message;
-                    Console.WriteLine(errorMessage);
-                }
+                    if (e == null)
+                    {
+                        errorMessage = "MapDataChanged Unexpected error: DataChangedEventArgs can not be null";
+                        Console.WriteLine(errorMessage);
+                    }
+                    else if (e.Cancelled)
+                    {
+                        errorMessage = "MapDataChanged: Cancelled";
+                        System.Diagnostics.Debug.WriteLine(errorMessage);
+                    }
+                    else if (e.Error is System.Net.WebException)
+                    {
+                        errorMessage = "MapDataChanged WebException: " + e.Error.Message;
+                        Console.WriteLine(errorMessage);
+                    }
+                    else if (e.Error != null)
+                    {
+                        errorMessage = "MapDataChanged errorMessage: " + e.Error.GetType() + ": " + e.Error.Message;
+                        Console.WriteLine(errorMessage);
+                    }
 
-                RefreshGraphics();
+                    RefreshGraphics();
+                }
+                catch (Exception exception)
+                {
+                    Logger.Log(LogLevel.Warning, "Unexpected exception in MapDataChanged", exception);
+                }
             });
         }
 
         public void RefreshGraphics()
         {
             SetNeedsDisplay();
+            InvalidateCanvas();
+        }
+
+        public void RefreshData()
+        {
+            _map?.ViewChanged(true);
+        }
+
+        internal void InvalidateCanvas()
+        {
             _canvas?.SetNeedsDisplay();
+        }
+
+        public override CGRect Frame
+        {
+            get => base.Frame;
+            set
+            {
+                _canvas.Frame = value;
+                base.Frame = value;
+
+                if (_map?.Viewport == null) return;
+
+                _map.Viewport.Width = _canvas.Frame.Width;
+                _map.Viewport.Height = _canvas.Frame.Height;
+
+                Refresh();
+            }
+        }
+
+        public override void LayoutMarginsDidChange()
+        {
+            if (_canvas == null) return;
+
+            base.LayoutMarginsDidChange();
+
+            if (_map?.Viewport == null) return;
+
+            _map.Viewport.Width = _canvas.Frame.Width;
+            _map.Viewport.Height = _canvas.Frame.Height;
+
+            Refresh();
+        }
+
+        private static void WidgetTouched(IWidget widget, Point screenPosition)
+        {
+            if (widget is Hyperlink) UIApplication.SharedApplication.OpenUrl(new NSUrl(((Hyperlink)widget).Url));
+
+            widget.HandleWidgetTouched(screenPosition);
         }
     }
 }

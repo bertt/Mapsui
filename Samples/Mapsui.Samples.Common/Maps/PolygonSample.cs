@@ -1,4 +1,5 @@
-﻿using Mapsui.Geometries;
+﻿using System.Collections.Generic;
+using Mapsui.Geometries;
 using Mapsui.Layers;
 using Mapsui.Providers;
 using Mapsui.Styles;
@@ -24,14 +25,21 @@ namespace Mapsui.Samples.Common.Maps
                 Style = new VectorStyle
                 {
                     Fill = new Brush(new Color(150, 150, 30, 128)),
-                    Outline = new Pen(Color.Orange, 2),
-                    
+                    Outline = new Pen
+                    {
+                        Color = Color.Orange,
+                        Width = 2,
+                        PenStyle = PenStyle.DashDotDot, //.Solid,
+                        PenStrokeCap = PenStrokeCap.Round
+                    }
                 }
             };
         }
 
-        private static Polygon CreatePolygon()
+        private static List<Polygon> CreatePolygon()
         {
+            var result = new List<Polygon>();
+
             var polygon = new Polygon();
             polygon.ExteriorRing.Vertices.Add(new Point(0, 0));
             polygon.ExteriorRing.Vertices.Add(new Point(0, 10000000));
@@ -45,7 +53,26 @@ namespace Mapsui.Samples.Common.Maps
             linearRing.Vertices.Add(new Point(1000000, 9000000));
             linearRing.Vertices.Add(new Point(1000000, 1000000));
             polygon.InteriorRings.Add(linearRing);
-            return polygon;
+
+            result.Add(polygon);
+
+            polygon = new Polygon();
+            polygon.ExteriorRing.Vertices.Add(new Point(-10000000, 0));
+            polygon.ExteriorRing.Vertices.Add(new Point(-15000000, 5000000));
+            polygon.ExteriorRing.Vertices.Add(new Point(-10000000, 10000000));
+            polygon.ExteriorRing.Vertices.Add(new Point(-5000000, 5000000));
+            polygon.ExteriorRing.Vertices.Add(new Point(-10000000, 0));
+            linearRing = new LinearRing();
+            linearRing.Vertices.Add(new Point(-10000000, 1000000));
+            linearRing.Vertices.Add(new Point(-6000000, 5000000));
+            linearRing.Vertices.Add(new Point(-10000000, 9000000));
+            linearRing.Vertices.Add(new Point(-14000000, 5000000));
+            linearRing.Vertices.Add(new Point(-10000000, 1000000));
+            polygon.InteriorRings.Add(linearRing);
+
+            result.Add(polygon);
+
+            return result;
         }
     }
 }

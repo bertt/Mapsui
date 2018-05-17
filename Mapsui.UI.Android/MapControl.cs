@@ -1,36 +1,31 @@
 using System;
+using System.Collections.Generic;
 using System.ComponentModel;
+using System.Linq;
 using Android.App;
 using Android.Content;
 using Android.Graphics;
 using Android.Util;
 using Android.Views;
-using Android.Widget;
 using Java.Lang;
 using Mapsui.Fetcher;
+using Mapsui.Geometries.Utilities;
 using Mapsui.Layers;
+using Mapsui.Logging;
+using Mapsui.Widgets;
 using SkiaSharp.Views.Android;
 using Math = System.Math;
 
 namespace Mapsui.UI.Android
 {
-    public class MapControl : ViewGroup, IMapControl
+    public partial class MapControl : ViewGroup, IMapControl
     {
-        private const int None = 0;
-        private const int Dragging = 1;
-        private const int Zoom = 2;
-        private int _mode = None;
-        private PointF _previousMap, _currentMap;
-        private PointF _previousMid = new PointF();
-        private readonly PointF _currentMid = new PointF();
-        private float _oldDist = 1f;
-        private bool _viewportInitialized;
         private Rendering.Skia.MapRenderer _renderer;
         private SKCanvasView _canvas;
         private Map _map;
-        private AttributionPanel _attributionPanel;
-        private float _scale;
-        
+        private double _innerRotation;
+        private GestureDetector _gestureDetector;
+
         public event EventHandler ViewportInitialized;
 
         public MapControl(Context context, IAttributeSet attrs) :
@@ -39,7 +34,7 @@ namespace Mapsui.UI.Android
             Initialize();
         }
 
-        public MapControl(Context context, IAttributeSet attrs, int defStyle):
+        public MapControl(Context context, IAttributeSet attrs, int defStyle) :
             base(context, attrs, defStyle)
         {
             Initialize();
@@ -47,45 +42,66 @@ namespace Mapsui.UI.Android
 
         public void Initialize()
         {
+            SetBackgroundColor(Color.Transparent);
             _scale = Resources.DisplayMetrics.Density;
 
             _canvas = new SKCanvasView(Context);
             _canvas.PaintSurface += CanvasOnPaintSurface;
             AddView(_canvas);
 
-            AddView(_attributionPanel = new AttributionPanel(Context));
-            
             Map = new Map();
             _renderer = new Rendering.Skia.MapRenderer();
-            InitializeViewport();
+            TryInitializeViewport();
             Touch += MapView_Touch;
+            
+            _gestureDetector = new GestureDetector(Context, new GestureDetector.SimpleOnGestureListener());
+            _gestureDetector.SingleTapConfirmed += OnSingleTapped;
+            _gestureDetector.DoubleTap += OnDoubleTapped;
         }
+
+        private void OnDoubleTapped(object sender, GestureDetector.DoubleTapEventArgs e)
+        {
+            var position = GetScreenPosition(e.Event, this);
+            Map.InvokeInfo(position, position, _scale, _renderer.SymbolCache, WidgetTouched, 2);
+        }
+        
+        private void OnSingleTapped(object sender, GestureDetector.SingleTapConfirmedEventArgs e)
+        {
+            var position = GetScreenPosition(e.Event, this);
+            Map.InvokeInfo(position, position, _scale, _renderer.SymbolCache, WidgetTouched, 1);
+        }        
 
         protected override void OnSizeChanged(int w, int h, int oldw, int oldh)
         {
-            Map.Viewport.Width = Width / _scale;
-            Map.Viewport.Height = Height / _scale;
-
             base.OnSizeChanged(w, h, oldw, oldh);
+            PushSizeOntoViewport();
+        }
+
+        void PushSizeOntoViewport()
+        {
+            if (Map != null)
+            {
+                Map.Viewport.Width = Width / _scale;
+                Map.Viewport.Height = Height / _scale;
+            }
         }
 
         private void CanvasOnPaintSurface(object sender, SKPaintSurfaceEventArgs args)
         {
-            if (!_viewportInitialized)
-                InitializeViewport();
-            if (!_viewportInitialized)
-                return;
+            TryInitializeViewport();
+            if (!_map.Viewport.Initialized) return;
 
             args.Surface.Canvas.Scale(_scale, _scale);
 
-            _renderer.Render(args.Surface.Canvas, _map.Viewport, _map.Layers, _map.BackColor);
+            _renderer.Render(args.Surface.Canvas, _map.Viewport, _map.Layers, _map.Widgets, _map.BackColor);
         }
 
-        private void InitializeViewport()
+        private void TryInitializeViewport()
         {
-            if (ViewportHelper.TryInitializeViewport(_map, Width / _scale, Height / _scale))
+            if (_map.Viewport.Initialized) return;
+
+            if (_map.Viewport.TryInitializeViewport(_map, Width / _scale, Height / _scale))
             {
-                _viewportInitialized = true;
                 Map.ViewChanged(true);
                 OnViewportInitialized();
             }
@@ -98,68 +114,113 @@ namespace Mapsui.UI.Android
 
         public void MapView_Touch(object sender, TouchEventArgs args)
         {
-            var x = (int)args.Event.RawX;
-            var y = (int)args.Event.RawY;
+            if (_gestureDetector.OnTouchEvent(args.Event))
+                return;
+
+            var touchPoints = GetMapPositions(args.Event, this);
+
             switch (args.Event.Action)
             {
-                case MotionEventActions.Down:
-                    _previousMap = null;
-                    _mode = Dragging;
-                    break;
                 case MotionEventActions.Up:
-                    _previousMap = null;
-                    Invalidate();
-                    _mode = None;
+                    InvalidateCanvas();
+                    _mode = TouchMode.None;
                     _map.ViewChanged(true);
-                    Map.InvokeInfo(GetPosition(args.Event).ToMapsui(), _renderer.SymbolCache);
                     break;
+                case MotionEventActions.Down:
+                case MotionEventActions.Pointer1Down:
                 case MotionEventActions.Pointer2Down:
-                    _previousMap = null;
-                    _oldDist = Spacing(args.Event);
-                    MidPoint(_currentMid, args.Event);
-                    _previousMid = _currentMid;
-                    _mode = Zoom;
+                case MotionEventActions.Pointer3Down:
+                    if (touchPoints.Count >= 2)
+                    {
+                        (_previousCenter, _previousRadius, _previousAngle) = GetPinchValues(touchPoints);
+                        _mode = TouchMode.Zooming;
+                        _innerRotation = _map.Viewport.Rotation;
+                    }
+                    else
+                    {
+                        _mode = TouchMode.Dragging;
+                        _previousCenter = touchPoints.First();
+                    }
                     break;
+                case MotionEventActions.Pointer1Up:
                 case MotionEventActions.Pointer2Up:
-                    _previousMap = null;
-                    _previousMid = null;
-                    _mode = Dragging;
+                case MotionEventActions.Pointer3Up:
+                    // Remove the touchPoint that was released from the locations to reset the
+                    // starting points of the move and rotation
+                    touchPoints.RemoveAt(args.Event.ActionIndex);           
+
+                    if (touchPoints.Count >= 2)
+                    {
+                        (_previousCenter, _previousRadius, _previousAngle) = GetPinchValues(touchPoints);
+                        _mode = TouchMode.Zooming;
+                        _innerRotation = _map.Viewport.Rotation;
+                    }
+                    else
+                    {
+                        _mode = TouchMode.Dragging;
+                        _previousCenter = touchPoints.First();
+                    }
                     break;
                 case MotionEventActions.Move:
                     switch (_mode)
                     {
-                        case Dragging:
-                            _currentMap = new PointF(x, y);
-                            if (_previousMap != null)
+                        case TouchMode.Dragging:
                             {
-                                _map.Viewport.Transform(
-                                    _currentMap.X  / _scale,
-                                    _currentMap.Y / _scale,
-                                    _previousMap.X / _scale,
-                                    _previousMap.Y / _scale);
-                                Invalidate();
-                            }
-                            _previousMap = _currentMap;
-                            break;
-                        case Zoom:
-                            {
-                                if (args.Event.PointerCount < 2)
+                                if (touchPoints.Count != 1)
                                     return;
 
-                                var newDist = Spacing(args.Event);
-                                var scale = newDist / _oldDist;
+                                var touchPosition = touchPoints.First();
+                                if (_previousCenter != null && !_previousCenter.IsEmpty())
+                                {
+                                    _map.Viewport.Transform(touchPosition.X, touchPosition.Y, _previousCenter.X, _previousCenter.Y);
 
-                                _oldDist = Spacing(args.Event);
-                                _previousMid = new PointF(_currentMid.X, _currentMid.Y);
-                                MidPoint(_currentMid, args.Event);
+                                    ViewportLimiter.LimitExtent(_map.Viewport, _map.PanMode, _map.PanLimits, _map.Envelope);
 
-                                _map.Viewport.Transform(
-                                    _currentMid.X / _scale,
-                                    _currentMid.Y / _scale,
-                                    _previousMid.X / _scale,
-                                    _previousMid.Y / _scale,
-                                    scale);
-                                Invalidate();
+                                    InvalidateCanvas();
+                                }
+                                _previousCenter = touchPosition;
+                            }
+                            break;
+                        case TouchMode.Zooming:
+                            {
+                                if (touchPoints.Count < 2)
+                                    return;
+
+                                var (prevCenter, prevRadius, prevAngle) = (_previousCenter, _previousRadius, _previousAngle);
+                                var (center, radius, angle ) = GetPinchValues(touchPoints);
+
+                                double rotationDelta = 0;
+
+                                if (RotationLock)
+                                {
+                                    _innerRotation += angle - prevAngle;
+                                    _innerRotation %= 360;
+
+                                    if (_innerRotation > 180)
+                                        _innerRotation -= 360;
+                                    else if (_innerRotation < -180)
+                                        _innerRotation += 360;
+
+                                    if (_map.Viewport.Rotation == 0 && Math.Abs(_innerRotation) >= Math.Abs(UnSnapRotationDegrees))
+                                        rotationDelta = _innerRotation;
+                                    else if (_map.Viewport.Rotation != 0)
+                                    {
+                                        if (Math.Abs(_innerRotation) <= Math.Abs(ReSnapRotationDegrees))
+                                            rotationDelta = -_map.Viewport.Rotation;
+                                        else
+                                            rotationDelta = _innerRotation - _map.Viewport.Rotation;
+                                    }
+                                }
+
+                                _map.Viewport.Transform(center.X, center.Y, prevCenter.X, prevCenter.Y, radius / prevRadius, rotationDelta);
+
+                                (_previousCenter, _previousRadius, _previousAngle) = (center, radius, angle);
+
+                                ViewportLimiter.Limit(_map.Viewport, 
+                                    _map.ZoomMode, _map.ZoomLimits, _map.Resolutions,
+                                    _map.PanMode, _map.PanLimits, _map.Envelope);
+
+                                InvalidateCanvas();
                             }
                             break;
                     }
@@ -167,60 +228,41 @@ namespace Mapsui.UI.Android
             }
         }
 
-        private static float Spacing(MotionEvent me)
+        private List<Geometries.Point> GetMapPositions(MotionEvent me, View view)
         {
-            if (me.PointerCount < 2)
-                throw new ArgumentException();
-
-            var x = me.GetX(0) - me.GetX(1);
-            var y = me.GetY(0) - me.GetY(1);
-            return (float)Math.Sqrt(x * x + y * y);
+            var result = new List<Geometries.Point>();
+            for (var i = 0; i < me.PointerCount; i++)
+            {
+                result.Add(new Geometries.Point((me.GetX(i) - view.Left) / _scale, (me.GetY(i) - view.Top) / _scale));
+            }
+            return result;
         }
 
-        private static void MidPoint(PointF point, MotionEvent motionEvent)
+        private static Geometries.Point GetScreenPosition(MotionEvent motionEvent, View view)
         {
-            var position = GetPosition2(motionEvent);
-            point.Set(position.X / 2, position.Y / 2);
-        }
-        
-        private static PointF GetPosition2(MotionEvent motionEvent)
-        {
-            return new PointF(motionEvent.GetX(0) + motionEvent.GetX(1), motionEvent.GetY(0) + motionEvent.GetY(1));
-        }
-
-        private static PointF GetPosition(MotionEvent motionEvent)
-        {
-            return new PointF(motionEvent.GetX(0) , motionEvent.GetY(0));
+            return new PointF(
+                motionEvent.GetX(0) - view.Left, 
+                motionEvent.GetY(0) - view.Top).ToMapsui();
         }
 
         public Map Map
         {
-            get
-            {
-                return _map;
-            }
+            get => _map;
             set
             {
                 if (_map != null)
                 {
-                    var temp = _map;
+                    UnsubscribeFromMapEvents(_map);
                     _map = null;
-                    temp.DataChanged -= MapDataChanged;
-                    temp.PropertyChanged -= MapPropertyChanged;
-                    temp.RefreshGraphics -= MapRefreshGraphics;
-                    temp.Dispose();
-                    _attributionPanel.Clear();
                 }
 
                 _map = value;
 
                 if (_map != null)
                 {
-                    _map.DataChanged += MapDataChanged;
-                    _map.PropertyChanged += MapPropertyChanged;
-                    _map.RefreshGraphics += MapRefreshGraphics;
+                    SubscribeToMapEvents(_map);
                     _map.ViewChanged(true);
-                    _attributionPanel.Populate(Map.Layers);
+                    PushSizeOntoViewport();
                 }
 
                 RefreshGraphics();
@@ -242,35 +284,54 @@ namespace Mapsui.UI.Android
             {
                 RefreshGraphics();
             }
-            else if (e.PropertyName == nameof(Map.Layers))
-            {
-                _attributionPanel.Populate(Map.Layers);
-            }
         }
 
-        public void MapDataChanged(object sender, DataChangedEventArgs e)
+        private void MapDataChanged(object sender, DataChangedEventArgs e)
         {
             if (e.Cancelled || e.Error != null)
             {
-                // todo: test code below:
-                ((Activity)Context).RunOnUiThread(new Runnable(Toast.MakeText(Context, e.Error.Message, ToastLength.Short).Show));
+                Logger.Log(LogLevel.Warning, "An error occurred while fetching data", e.Error);
+            }
+            else if (e.Cancelled)
+            {
+                Logger.Log(LogLevel.Warning, "Fetching data was cancelled", e.Error);
             }
             else // no problems
             {
-                ((Activity)Context).RunOnUiThread(new Runnable(RefreshGraphics));
+                RefreshGraphics();
             }
+        }
+
+        protected override void OnDraw(Canvas canvas)
+        {
+            Invalidate();
+            base.OnDraw(canvas);
         }
 
         public void RefreshGraphics()
         {
-            PostInvalidate();
+            _canvas.PostInvalidate();
+        }
+
+        public void RefreshData()
+        {
+            _map.ViewChanged(true);
+        }
+
+        public void Refresh()
+        {
+            RefreshData();
+            RefreshGraphics();
+        }
+
+        internal void InvalidateCanvas()
+        {
+            _canvas?.Invalidate();
         }
 
         protected override void OnLayout(bool changed, int l, int t, int r, int b)
         {
             Position(_canvas, l, t, r, b);
-            UpdateSize(_attributionPanel);
-            PositionBottomRight(_attributionPanel);
         }
 
         private void Position(View view, int l, int t, int r, int b)
@@ -281,17 +342,21 @@ namespace Mapsui.UI.Android
             view.Right = r;
         }
 
-        private void PositionBottomRight(View view)
+        private void WidgetTouched(IWidget widget, Geometries.Point screenPosition)
         {
-            Position(view, Right - view.Width, Bottom - view.Height, Right, Bottom);
-        }
+            if (widget is Hyperlink)
+            {
+                var hyperlink = (Hyperlink)widget;
+                global::Android.Net.Uri uri = global::Android.Net.Uri.Parse(hyperlink.Url);
+                Intent intent = new Intent(Intent.ActionView);
+                intent.SetData(uri);
 
-        private static void UpdateSize(View view)
-        {
-            // I created this method because I don't understand what I'm doing
-            view.Measure(0, 0);
-            view.Right = view.Left + view.MeasuredWidth;
-            view.Bottom = view.Top + view.MeasuredHeight;
+                Intent chooser = Intent.CreateChooser(intent, "Open with");
+
+                Context.StartActivity(chooser);
+            }
+
+            widget.HandleWidgetTouched(screenPosition);
         }
     }
 }

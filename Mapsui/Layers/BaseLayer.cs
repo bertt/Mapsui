@@ -6,6 +6,7 @@ using Mapsui.Geometries;
 using Mapsui.Projection;
 using Mapsui.Providers;
 using Mapsui.Styles;
+using Mapsui.Widgets;
 
 namespace Mapsui.Layers
 {
@@ -23,6 +24,8 @@ namespace Mapsui.Layers
         private IStyle _style;
         private object _tag;
         private ITransformation _transformation;
+        private readonly Transformer _transformer = new Transformer();
+        private BoundingBox _envelope;
 
         protected BaseLayer()
         {
@@ -50,7 +53,7 @@ namespace Mapsui.Layers
         /// </summary>
         public object Tag 
         { 
-            get { return _tag; }
+            get => _tag;
             set
             { 
                 _tag = value; 
@@ -63,7 +66,7 @@ namespace Mapsui.Layers
         /// </summary>
         public double MinVisible
         {
-            get { return _minVisible; }
+            get => _minVisible;
             set
             {
                 _minVisible = value;
@@ -76,7 +79,7 @@ namespace Mapsui.Layers
         /// </summary>
         public double MaxVisible
         {
-            get { return _maxVisible; }
+            get => _maxVisible;
             set
             {
                 _maxVisible = value;
@@ -89,7 +92,7 @@ namespace Mapsui.Layers
         /// </summary>
         public bool Enabled
         {
-            get{ return _enabled; } 
+            get => _enabled;
             set
             {
                 if (_enabled == value) return;
@@ -103,7 +106,7 @@ namespace Mapsui.Layers
         /// </summary>
         public string Name
         {
-            get { return _name; }
+            get => _name;
             set
             {
                 _name = value;
@@ -116,17 +119,18 @@ namespace Mapsui.Layers
         /// </summary>
         public string CRS
         {
-            get { return _crs; }
+            get => _crs;
             set
             {
                 _crs = value;
+                _transformer.ToCrs = CRS;
                 OnPropertyChanged(nameof(CRS));
             }
         }
 
         public bool Exclusive
         {
-            get { return _exclusive; }
+            get => _exclusive;
             set
             {
                 _exclusive = value;
@@ -136,7 +140,7 @@ namespace Mapsui.Layers
 
         public double Opacity
         {
-            get { return _opacity; }
+            get => _opacity;
             set
             {
                 _opacity = value;
@@ -146,9 +150,10 @@ namespace Mapsui.Layers
 
         public bool Busy
         {
-            get { return _busy; }
+            get => _busy;
             set
             {
+                if (_busy == value) return;
                 _busy = value;
                 OnPropertyChanged(nameof(Busy));
             }
@@ -159,7 +164,7 @@ namespace Mapsui.Layers
         /// </summary>
         public IStyle Style
         {
-            get { return _style; }
+            get => _style;
             set
             {
                 _style = value;
@@ -172,18 +177,32 @@ namespace Mapsui.Layers
         /// </summary>
         public ITransformation Transformation
         {
-            get { return _transformation; }
+            get => _transformation;
             set
             {
                 _transformation = value;
+                _transformer.Transformation = _transformation;
                 OnPropertyChanged(nameof(Transformation));
             }
+        }
+
+        public Transformer Transformer
+        {
+            get => _transformer;
         }
 
         /// <summary>
         /// Returns the envelope of all avaiable data in the layer
         /// </summary>
-        public abstract BoundingBox Envelope { get; }
+        public virtual BoundingBox Envelope
+        {
+            get => _envelope;
+            protected set
+            {
+                _envelope = value;
+                OnPropertyChanged(nameof(Envelope));
+            }
+        }
 
         public abstract IEnumerable<IFeature> GetFeaturesInView(BoundingBox box, double resolution);
 
@@ -205,7 +224,7 @@ namespace Mapsui.Layers
             return Name;
         }
 
-        protected void OnPropertyChanged(string name)
+        protected virtual void OnPropertyChanged(string name)
         {
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
         }
@@ -219,10 +238,10 @@ namespace Mapsui.Layers
         {
             if (layer == null) return new IStyle[0];
             var style = layer.Style as StyleCollection;
-            return style != null ? style.ToArray() : new[] { layer.Style };
+            return style?.ToArray() ?? new[] { layer.Style };
         }
 
-        public Attribution Attribution { get; } = new Attribution();
+        public Hyperlink Attribution { get; set; }
 
         public virtual IReadOnlyList<double> Resolutions { get; } = new List<double>();
     }
