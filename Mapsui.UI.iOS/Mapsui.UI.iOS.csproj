@@ -34,10 +34,10 @@
   </PropertyGroup>
   <ItemGroup>
     <Reference Include="SkiaSharp, Version=1.60.0.0, Culture=neutral, PublicKeyToken=0738eb9f132ed756, processorArchitecture=MSIL">
-      <HintPath>..\packages\SkiaSharp.1.60.0\lib\XamariniOS\SkiaSharp.dll</HintPath>
+      <HintPath>..\packages\SkiaSharp.1.60.3\lib\Xamarin.iOS\SkiaSharp.dll</HintPath>
     </Reference>
     <Reference Include="SkiaSharp.Views.iOS, Version=1.60.0.0, Culture=neutral, PublicKeyToken=0738eb9f132ed756, processorArchitecture=MSIL">
-      <HintPath>..\packages\SkiaSharp.Views.1.60.0\lib\XamariniOS\SkiaSharp.Views.iOS.dll</HintPath>
+      <HintPath>..\packages\SkiaSharp.Views.1.60.3\lib\Xamarin.iOS\SkiaSharp.Views.iOS.dll</HintPath>
     </Reference>
     <Reference Include="System" />
     <Reference Include="System.Xml" />
@@ -49,9 +49,7 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="ExtensionMethods\CGPointExtensions.cs" />
-    <Compile Include="GestureDelegate.cs" />
     <Compile Include="MapControl.cs" />
-    <Compile Include="MapHelper.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>
   <ItemGroup>
@@ -60,7 +58,7 @@
       <Name>Mapsui.Geometries</Name>
     </ProjectReference>
     <ProjectReference Include="..\Mapsui.Rendering.Skia\Mapsui.Rendering.Skia.csproj">
-      <Project>{ae632270-38ca-4203-93a5-8612629cd944}</Project>
+      <Project>{DEA6E9AE-2B6A-4E83-83B7-E9DF0E492301}</Project>
       <Name>Mapsui.Rendering.Skia</Name>
     </ProjectReference>
     <ProjectReference Include="..\Mapsui\Mapsui.csproj">
